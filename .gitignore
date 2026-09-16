@@ -1,0 +1,14 @@
+# 运行时落盘数据（每次 go run 生成）
+chain_*.json
+chain_*.db/
+
+# 编译产物
+blockchain
+blockchain.exe
+*.test
+*.out
+
+# IDE / 编辑器
+.idea/
+.vscode/
+*.iml
