@@ -23,6 +23,9 @@ func main() {
 
 // runDemo 内置两节点演示：先让两个节点分叉，再联网同步，展示「最长链胜出」。
 func runDemo(difficulty int) {
+	// 演示模式下把日志也写到标准输出，保证日志与结果按时间顺序交错输出
+	log.SetOutput(os.Stdout)
+
 	// 清掉旧数据，保证每次从创世块重新开始（分叉可控、可复现）
 	os.RemoveAll("chain_8001.db")
 	os.RemoveAll("chain_8002.db")

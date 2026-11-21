@@ -55,31 +55,27 @@ cd go-blockchain
 go run .
 ```
 
-程序会启动 2 个节点（`:8001` / `:8002`），演示一段完整剧情：两个节点先各自挖矿产生**分叉** → 联网后按**最长链**达成共识（reorg）→ 孤立块的奖励作废。预期（地址和哈希会不同）：
+程序会启动 2 个节点（`:8001` / `:8002`），演示一段完整剧情：两个节点先各自挖矿产生**分叉** → 联网后按**最长链**达成共识（reorg）→ 孤立块的奖励作废：
 
-```
-=== 分叉后：两条链已经分家 ===
-node1 链长: 3  node2 链长: 2
-node1 尾块: 000084c1…
-node2 尾块: 00008c7c…
+![运行演示](docs/demo.png)
 
-=== 共识后：最长链胜出 ===
-node1 链长: 3  node2 链长: 3
-node1 尾块: 000084c1…
-node2 尾块: 000084c1…    ← 两节点尾块已一致
-
-=== 余额账本（minb 的孤立块奖励已作废）===
-node1:
-  c493ad97…ab1602 = 100   ← node1 矿工两块奖励 50×2
-node2:
-  c493ad97…ab1602 = 100   ← node2 矿工孤立块的 50 已作废
-```
+（地址和哈希每次不同；`minb` 是 node2 的矿工地址，node2 换链后它的 50 奖励因孤立块作废。）
 
 演示模式每次会清空重来（保证分叉可复现）。想看**持久化**，跑单节点模式，Ctrl+C 退出后再起一次，区块数会接着涨：
 
 ```bash
 go run . -demo=false -data=chain.db   # 第一次：挖几块后 Ctrl+C
 go run . -demo=false -data=chain.db   # 第二次：从 BadgerDB 恢复，接着之前的高度
+```
+
+## Docker
+
+两阶段构建：`golang:1.21-alpine` 里编译，最终镜像只放一个静态二进制。
+
+```bash
+docker build -t go-blockchain .
+docker run --rm -p 8001:8001 -v ${PWD}/data:/data go-blockchain
+# 想跑分叉演示：docker run --rm go-blockchain -demo=true
 ```
 
 ## HTTP 接口

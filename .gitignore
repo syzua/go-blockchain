@@ -5,8 +5,14 @@ chain_*.db/
 # 编译产物
 blockchain
 blockchain.exe
+node.exe
 *.test
 *.out
+
+# 演示输出临时文件
+demo_out.txt
+demo_err.txt
+demo_output.txt
 
 # IDE / 编辑器
 .idea/

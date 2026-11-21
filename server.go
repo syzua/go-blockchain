@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// httpClient 节点之间通信用带超时的客户端。
+// 不加超时的话，只要有一个 peer 卡住，整轮同步都会被它拖死。
+var httpClient = &http.Client{Timeout: 3 * time.Second}
+
 // Server 一个「带 HTTP 接口 + P2P 广播」的区块链节点。
 type Server struct {
 	chain      *Blockchain
@@ -71,9 +75,9 @@ func (s *Server) syncFromPeers() {
 	s.mu.Unlock()
 
 	for _, peer := range peers {
-		resp, err := http.Get("http://" + peer + "/chain")
+		resp, err := httpClient.Get("http://" + peer + "/chain")
 		if err != nil {
-			continue // 某个 peer 没起来，跳过，下轮再试
+			continue // 某个 peer 没起来或超时，跳过，下轮再试
 		}
 		var blocks []*Block
 		if err := json.NewDecoder(resp.Body).Decode(&blocks); err != nil {
@@ -216,10 +220,15 @@ func (s *Server) handleReceive(w http.ResponseWriter, r *http.Request) {
 // broadcast 把新区块并发广播给所有 peer（goroutine 并发发 + channel 收结果）。
 func (s *Server) broadcast(block *Block) {
 	data, _ := json.Marshal(block)
-	results := make(chan string, len(s.peers)) // 带缓冲 channel，收集每个 peer 的结果
-	for _, peer := range s.peers {
+
+	s.mu.Lock()
+	peers := append([]string(nil), s.peers...)
+	s.mu.Unlock()
+
+	results := make(chan string, len(peers)) // 带缓冲 channel，收集每个 peer 的结果
+	for _, peer := range peers {
 		go func(peer string) { // 每个 peer 一条 goroutine，并发发送
-			resp, err := http.Post("http://"+peer+"/receive", "application/json", bytes.NewReader(data))
+			resp, err := httpClient.Post("http://"+peer+"/receive", "application/json", bytes.NewReader(data))
 			if err != nil {
 				results <- "广播到 " + peer + " 失败: " + err.Error()
 				return
@@ -228,7 +237,7 @@ func (s *Server) broadcast(block *Block) {
 			results <- "广播到 " + peer + " 成功 (" + resp.Status + ")"
 		}(peer)
 	}
-	for range s.peers {
+	for range peers {
 		fmt.Println("  ", <-results) // 从 channel 收结果，收满 peers 个
 	}
 }
