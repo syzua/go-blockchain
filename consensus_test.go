@@ -4,6 +4,16 @@ import (
 	"testing"
 )
 
+// mineBelowDifficulty 造一个「哈希自洽、但不满足难度」的块。
+// 用来模拟不花算力、只改字段就想骗过校验的伪造块。
+func mineBelowDifficulty(b *Block, difficulty int) {
+	b.mine(0)
+	for b.hasValidPoW(difficulty) {
+		b.Nonce++
+		b.Hash = b.calcHash()
+	}
+}
+
 // buildChain 造一条含 n 个区块的链（创世块 + miner 挖 n-1 块），返回链和挖矿钱包。
 func buildChain(t *testing.T, n int) (*Blockchain, *Wallet) {
 	t.Helper()
@@ -73,6 +83,84 @@ func TestReplaceChainRejectsInvalid(t *testing.T) {
 	}
 	if short.Len() != 2 {
 		t.Fatalf("拒绝后短链不应变，实际 %d", short.Len())
+	}
+}
+
+// 外来块的哈希必须真的达到难度门槛：哈希自洽但没挖够的块要拒绝。
+func TestAddExternalBlockRejectsInvalidPoW(t *testing.T) {
+	bc, err := NewBlockchain(1, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bc.Close()
+
+	b := &Block{Index: 1, Timestamp: 1, PrevHash: bc.blocks[0].Hash}
+	mineBelowDifficulty(b, 1) // 自洽，但哈希不以 0 开头
+	if ok, _ := bc.AddExternalBlock(b); ok {
+		t.Fatal("未达到难度门槛的区块应被拒绝")
+	}
+	if bc.Len() != 1 {
+		t.Fatalf("拒绝后链长应仍为 1，实际 %d", bc.Len())
+	}
+}
+
+// 铸币金额必须等于固定奖励，否则等于让任何人凭空印钱。
+func TestAddBlockRejectsWrongCoinbaseAmount(t *testing.T) {
+	bc, err := NewBlockchain(1, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bc.Close()
+
+	miner := NewWallet()
+	if _, err := bc.AddBlock([]*Transaction{{To: miner.Address(), Amount: MiningReward * 20}}); err == nil {
+		t.Fatal("超额铸币应被拒绝")
+	}
+	if _, err := bc.AddBlock([]*Transaction{{To: miner.Address(), Amount: MiningReward}}); err != nil {
+		t.Fatalf("正常奖励应被接受：%v", err)
+	}
+}
+
+// 外来块里的超额铸币同样要拒绝，防止绕过本节点直接广播假块。
+func TestAddExternalBlockRejectsOversizedCoinbase(t *testing.T) {
+	bc, err := NewBlockchain(1, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bc.Close()
+
+	miner := NewWallet()
+	b := &Block{
+		Index:        1,
+		Timestamp:    1,
+		PrevHash:     bc.blocks[0].Hash,
+		Transactions: []*Transaction{{To: miner.Address(), Amount: MiningReward * 1000}},
+	}
+	b.mine(1) // PoW 合法，只有金额非法
+	if ok, _ := bc.AddExternalBlock(b); ok {
+		t.Fatal("含超额铸币的区块应被拒绝")
+	}
+}
+
+// 候选链里只要有一块没达到难度门槛，整条链都不能替换当前链。
+func TestReplaceChainRejectsLowPoWChain(t *testing.T) {
+	bc, err := NewBlockchain(1, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bc.Close()
+
+	g := genesisBlock()
+	b1 := &Block{Index: 1, Timestamp: 1, PrevHash: g.Hash}
+	mineBelowDifficulty(b1, 1)
+	b2 := &Block{Index: 2, Timestamp: 2, PrevHash: b1.Hash}
+	mineBelowDifficulty(b2, 1)
+
+	if _, err := bc.ReplaceChain([]*Block{g, b1, b2}); err == nil {
+		t.Fatal("含低难度块的候选链应被拒绝")
+	}
+	if bc.Len() != 1 {
+		t.Fatalf("拒绝后链长应仍为 1，实际 %d", bc.Len())
 	}
 }
 

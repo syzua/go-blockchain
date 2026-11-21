@@ -1,0 +1,8 @@
+.git
+.github
+*.db
+chain_*.db/
+*.test
+*.out
+README.md
+LICENSE

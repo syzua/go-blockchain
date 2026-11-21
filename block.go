@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -44,6 +45,15 @@ func (b *Block) mine(difficulty int) {
 		}
 		b.Nonce++
 	}
+}
+
+// hasValidPoW 校验区块哈希是否真的达到难度要求（前导零个数）。
+// 只校验「哈希自洽」是不够的：攻击者可以用难度 0 造出自洽但没花算力的块。
+func (b *Block) hasValidPoW(difficulty int) bool {
+	if difficulty <= 0 {
+		return true
+	}
+	return strings.HasPrefix(b.Hash, strings.Repeat("0", difficulty))
 }
 
 // Blockchain 整条链。
@@ -145,6 +155,9 @@ func (bc *Blockchain) AddExternalBlock(b *Block) (bool, error) {
 	if b.calcHash() != b.Hash {
 		return false, nil // 重新算哈希对不上（区块被篡改 / 挖矿无效）
 	}
+	if !b.hasValidPoW(bc.difficulty) {
+		return false, nil // 哈希没达到难度门槛（没真正花算力的伪造块）
+	}
 	// 在试算账本上逐笔校验：验签 + 余额，防止坏人广播「凭空转账」的块
 	snapshot := bc.cloneBalances()
 	for _, tx := range b.Transactions {
@@ -180,6 +193,10 @@ func (bc *Blockchain) applyTx(snapshot map[string]int, tx *Transaction) error {
 			return fmt.Errorf("付款方 %s 余额不足", tx.From)
 		}
 		snapshot[tx.From] -= tx.Amount
+	} else if tx.Amount != MiningReward {
+		// 铸币是唯一的「凭空发钱」入口，金额必须严格等于固定奖励，
+		// 否则任何人都能广播一个超大金额的铸币交易把通胀打爆。
+		return fmt.Errorf("铸币金额必须为 %d，实际 %d", MiningReward, tx.Amount)
 	}
 	snapshot[tx.To] += tx.Amount
 	return nil
@@ -200,7 +217,11 @@ func replayBalances(blocks []*Block) (map[string]int, error) {
 	m := make(map[string]int)
 	for _, b := range blocks {
 		for _, tx := range b.Transactions {
-			if !tx.IsCoinbase() {
+			if tx.IsCoinbase() {
+				if tx.Amount != MiningReward {
+					return nil, fmt.Errorf("区块 %d 含非法铸币金额 %d", b.Index, tx.Amount)
+				}
+			} else {
 				if !tx.Verify() {
 					return nil, fmt.Errorf("区块 %d 含无效签名交易", b.Index)
 				}
@@ -225,8 +246,8 @@ func (bc *Blockchain) rebuildBalances() error {
 	return nil
 }
 
-// validChain 校验一整条链的结构：创世一致、哈希逐块咬合、非铸币交易全部验签通过。
-func validChain(blocks []*Block) bool {
+// validChain 校验一整条链的结构：创世一致、哈希逐块咬合、每块都满足难度、非铸币交易全部验签通过。
+func validChain(blocks []*Block, difficulty int) bool {
 	if len(blocks) == 0 || blocks[0].Hash != genesisBlock().Hash {
 		return false // 空链，或创世块不是全网统一那个
 	}
@@ -237,6 +258,9 @@ func validChain(blocks []*Block) bool {
 		}
 		if cur.calcHash() != cur.Hash {
 			return false // 防线2：块内容被改，重算哈希对不上
+		}
+		if !cur.hasValidPoW(difficulty) {
+			return false // 防线3：哈希没达到难度门槛（伪造的低成本块）
 		}
 		for _, tx := range cur.Transactions {
 			if tx.IsCoinbase() {
@@ -252,7 +276,7 @@ func validChain(blocks []*Block) bool {
 
 // IsValid 校验当前链。
 func (bc *Blockchain) IsValid() bool {
-	return validChain(bc.blocks)
+	return validChain(bc.blocks, bc.difficulty)
 }
 
 // ReplaceChain 共识核心：用一条「更长且合法」的链替换当前链（reorg）。
@@ -261,7 +285,7 @@ func (bc *Blockchain) ReplaceChain(newBlocks []*Block) (bool, error) {
 	if len(newBlocks) <= len(bc.blocks) {
 		return false, nil // 不比当前长，不换
 	}
-	if !validChain(newBlocks) {
+	if !validChain(newBlocks, bc.difficulty) {
 		return false, errors.New("候选链结构非法，拒绝替换")
 	}
 	bal, err := replayBalances(newBlocks)

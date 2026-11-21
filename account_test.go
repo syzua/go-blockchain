@@ -4,6 +4,16 @@ import (
 	"testing"
 )
 
+// fund 连续挖 n 个区块，把每块的铸币奖励都发给 to（铸币金额固定为 MiningReward）。
+func fund(t *testing.T, bc *Blockchain, to string, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		if _, err := bc.AddBlock([]*Transaction{{To: to, Amount: MiningReward}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // 挖矿应给矿工铸币奖励，并能在账本里查到。
 func TestMiningReward(t *testing.T) {
 	bc, err := NewBlockchain(1, t.TempDir())
@@ -46,9 +56,7 @@ func TestTransferUpdatesBalances(t *testing.T) {
 	alice := NewWallet()
 	bob := NewWallet()
 
-	if _, err := bc.AddBlock([]*Transaction{{To: alice.Address(), Amount: 100}}); err != nil {
-		t.Fatal(err)
-	}
+	fund(t, bc, alice.Address(), 2) // 2 × 50 = 100
 	tx := &Transaction{From: alice.Address(), To: bob.Address(), Amount: 30}
 	tx.Sign(alice.PrivateKey)
 	if _, err := bc.AddBlock([]*Transaction{tx}); err != nil {
@@ -73,9 +81,7 @@ func TestAddBlockRejectsDoubleSpend(t *testing.T) {
 	defer bc.Close()
 	alice := NewWallet()
 	bob := NewWallet()
-	if _, err := bc.AddBlock([]*Transaction{{To: alice.Address(), Amount: 100}}); err != nil {
-		t.Fatal(err)
-	}
+	fund(t, bc, alice.Address(), 2) // 2 × 50 = 100
 	tx1 := &Transaction{From: alice.Address(), To: bob.Address(), Amount: 100}
 	tx1.Sign(alice.PrivateKey)
 	tx2 := &Transaction{From: alice.Address(), To: bob.Address(), Amount: 100}
@@ -94,9 +100,7 @@ func TestBalancesRestoredFromDisk(t *testing.T) {
 	}
 	alice := NewWallet()
 	bob := NewWallet()
-	if _, err := bc.AddBlock([]*Transaction{{To: alice.Address(), Amount: 100}}); err != nil {
-		t.Fatal(err)
-	}
+	fund(t, bc, alice.Address(), 2) // 2 × 50 = 100
 	tx := &Transaction{From: alice.Address(), To: bob.Address(), Amount: 40}
 	tx.Sign(alice.PrivateKey)
 	if _, err := bc.AddBlock([]*Transaction{tx}); err != nil {
